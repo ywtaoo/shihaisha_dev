@@ -1,0 +1,60 @@
+name: Setup New Project
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: '目标项目 (格式: owner/repo)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync labels
+        run: |
+          python3 -c "
+          import yaml, subprocess
+          with open('projects.yml') as f:
+              labels = yaml.safe_load(f)['labels']
+          for label in labels:
+              result = subprocess.run([
+                  'gh', 'label', 'create', label['name'],
+                  '--repo', '${{ inputs.repo }}',
+                  '--color', label['color'],
+                  '--description', label['description'],
+                  '--force'
+              ], capture_output=True, text=True)
+              status = '✅' if result.returncode == 0 else '❌'
+              print(f\"{status} {label['name']}\")
+          "
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+
+      - name: Sync issue templates
+        run: |
+          for TEMPLATE in bug_report feature_request quick_idea; do
+            CONTENT=$(base64 -w 0 < "templates/${TEMPLATE}.md")
+            gh api "repos/${{ inputs.repo }}/contents/.github/ISSUE_TEMPLATE/${TEMPLATE}.md" \
+              --method PUT \
+              --field message="chore: add ${TEMPLATE} issue template from orchestrator" \
+              --field content="$CONTENT" \
+              2>/dev/null && echo "✅ $TEMPLATE" || echo "⚠️  $TEMPLATE (may already exist)"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "✅ Setup complete for ${{ inputs.repo }}"
+          echo ""
+          echo "Next steps:"
+          echo "1. Create CLAUDE.md in ${{ inputs.repo }} with project-specific guidelines"
+          echo "2. Add ${{ inputs.repo }} to projects.yml if not already there"
+          echo "3. Ensure GH_PAT and ANTHROPIC_API_KEY secrets are set in this repo"

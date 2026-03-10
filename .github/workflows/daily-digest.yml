@@ -1,0 +1,78 @@
+name: Daily Digest
+
+on:
+  schedule:
+    - cron: '0 8 * * 1-5'  # 工作日 8am UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate digest
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          echo "## 📋 Daily Digest - $DATE" > digest.md
+          echo "" >> digest.md
+
+          REPOS=$(python3 -c "
+          import yaml
+          with open('projects.yml') as f:
+              for p in yaml.safe_load(f)['projects']:
+                  print(p['repo'])
+          ")
+
+          for REPO in $REPOS; do
+            echo "### $REPO" >> digest.md
+            echo "" >> digest.md
+
+            echo "**⏳ Ready (待处理):**" >> digest.md
+            READY=$(gh issue list --repo $REPO --label "status:ready" --state open --limit 10 --json number,title \
+              | python3 -c "import json,sys; issues=json.load(sys.stdin); [print(f'- #{i[\"number\"]} {i[\"title\"]}') for i in issues] or print('  _无_')")
+            echo "$READY" >> digest.md
+            echo "" >> digest.md
+
+            echo "**🔄 In Progress (进行中):**" >> digest.md
+            IN_PROG=$(gh issue list --repo $REPO --label "status:in-progress" --state open --limit 10 --json number,title \
+              | python3 -c "import json,sys; issues=json.load(sys.stdin); [print(f'- #{i[\"number\"]} {i[\"title\"]}') for i in issues] or print('  _无_')")
+            echo "$IN_PROG" >> digest.md
+            echo "" >> digest.md
+
+            echo "**🔍 Open PRs (待 Review):**" >> digest.md
+            PRS=$(gh pr list --repo $REPO --state open --limit 10 --json number,title,createdAt \
+              | python3 -c "
+          import json,sys
+          from datetime import datetime, timezone
+          prs=json.load(sys.stdin)
+          if not prs:
+              print('  _无_')
+          for pr in prs:
+              created=datetime.fromisoformat(pr['createdAt'].replace('Z','+00:00'))
+              days=(datetime.now(timezone.utc)-created).days
+              flag=' ⚠️' if days > 3 else ''
+              print(f'- #{pr[\"number\"]} {pr[\"title\"]} ({days}d){flag}')
+          ")
+            echo "$PRS" >> digest.md
+            echo "" >> digest.md
+            echo "---" >> digest.md
+            echo "" >> digest.md
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+
+      - name: Post digest as issue
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          gh issue create \
+            --repo ${{ github.repository }} \
+            --title "Daily Digest $DATE" \
+            --label "digest" \
+            --body-file digest.md
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}

@@ -1,0 +1,40 @@
+# 管理的项目列表
+projects:
+  - repo: ywtaoo/disciplinerr
+    tech_stack: typescript
+    auto_implement: true          # 是否自动处理 ready issues
+    auto_analyze: true            # 是否自动分析 needs-spec issues
+    auto_review: true             # 是否自动 review PR
+    schedule:
+      implement: "0 9 * * 1-5"   # 工作日 9am
+      analyze: "0 10 * * 3"      # 周三 10am
+
+# 共享 label 体系
+labels:
+  - name: "type:bug"
+    color: "d73a4a"
+    description: "Bug fix"
+  - name: "type:feature"
+    color: "a2eeef"
+    description: "New feature"
+  - name: "type:improvement"
+    color: "7057ff"
+    description: "Enhancement"
+  - name: "type:idea"
+    color: "e4e669"
+    description: "Unformed idea"
+  - name: "status:ready"
+    color: "0e8a16"
+    description: "Well-defined, agent can execute"
+  - name: "status:needs-spec"
+    color: "fbca04"
+    description: "Needs analysis and discussion"
+  - name: "status:in-progress"
+    color: "1d76db"
+    description: "Agent is working on it"
+  - name: "priority:high"
+    color: "b60205"
+    description: "High priority"
+  - name: "priority:low"
+    color: "c5def5"
+    description: "Low priority"

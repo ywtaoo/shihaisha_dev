@@ -1,0 +1,89 @@
+name: Process Ready Issues (All Projects)
+
+on:
+  schedule:
+    - cron: '0 9 * * 1-5'   # 工作日 9am UTC
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: '指定项目 (留空=全部, 格式: owner/repo)'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  load-projects:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.parse.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse projects.yml
+        id: parse
+        run: |
+          MATRIX=$(python3 -c "
+          import yaml, json
+          with open('projects.yml') as f:
+              config = yaml.safe_load(f)
+          projects = [p['repo'] for p in config['projects'] if p.get('auto_implement')]
+          target = '${{ inputs.target_repo }}'
+          if target:
+              projects = [p for p in projects if p == target]
+          print(json.dumps({'repo': projects}))
+          ")
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+  process:
+    needs: load-projects
+    runs-on: ubuntu-latest
+    if: ${{ needs.load-projects.outputs.matrix != '{"repo":[]}' }}
+    strategy:
+      matrix: ${{ fromJson(needs.load-projects.outputs.matrix) }}
+      max-parallel: 1  # 避免 API 限流
+    steps:
+      - uses: actions/checkout@v4  # checkout orchestrator (for prompts)
+
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.repo }}
+          path: target-repo
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Get ready issues
+        id: issues
+        run: |
+          ISSUES=$(gh issue list \
+            --repo ${{ matrix.repo }} \
+            --label "status:ready" \
+            --state open \
+            --json number,title,body \
+            --limit 3)
+          echo "issues<<EOF" >> $GITHUB_OUTPUT
+          echo "$ISSUES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "count=$(echo $ISSUES | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+
+      - name: Build prompt
+        if: steps.issues.outputs.count != '0'
+        id: prompt
+        run: |
+          PROMPT=$(cat prompts/implement.md)
+          PROMPT="${PROMPT//\{\{repo\}\}/${{ matrix.repo }}}"
+          ISSUE_JSON='${{ steps.issues.outputs.issues }}'
+          PROMPT="${PROMPT//\{\{issue\}\}/$ISSUE_JSON}"
+          echo "prompt<<EOF" >> $GITHUB_OUTPUT
+          echo "$PROMPT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Run Claude Code Agent
+        if: steps.issues.outputs.count != '0'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          working_directory: target-repo
+          prompt: ${{ steps.prompt.outputs.prompt }}
